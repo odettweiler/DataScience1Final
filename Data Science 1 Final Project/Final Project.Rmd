@@ -1,0 +1,300 @@
+---
+title: 'Final Project: Tempmerature Data in the World'
+output:
+  html_document:
+    df_print: paged
+---
+
+Initial Setup
+
+```{r}
+# library all necesssary packages
+library(maps)
+library(tidyverse)
+library(caret)
+library(caTools)
+library(lubridate)
+library(rworldmap)
+
+# set up with working directory then assign datasets to variables
+setwd("C:/Users/odettweiler/OneDrive - Eastside Preparatory School/Documents/07 - Data Science/R files/temperature data/")
+global_temps <- read.csv("GlobalTemperatures.csv")
+temps_by_country <- read.csv("GlobalLandTemperaturesByCountry.csv")
+temps_by_city <- read.csv("GlobalLandTemperaturesByMajorCity.csv")
+
+# check it out
+summary(temps_by_country)
+```
+
+Now to clean and augment the data!
+
+```{r}
+# as.Date code from here: https://www.statology.org/as-date-function-in-r/
+
+# add major city data here, cleaning NAs, adding fahrenheit, and converting dates to year
+
+temps_by_country <- temps_by_country |>
+  filter(!is.na(AverageTemperature)) |> # removing rows with NA values for temperature
+  mutate(AverageTemperatureF = 32 + ((9/5) * AverageTemperature)) |> # add fahrenheit data
+  mutate(Date = as.Date(dt)) |> # convert dates to Date type (is this necessary??)
+  mutate(Year = strtoi(substr(dt, 1, 4))) |> # add year column for easy filtering
+  filter(Year >= 1900) # filter to relevant data
+
+temps_by_city <- temps_by_city |>
+  filter(!is.na(AverageTemperature)) |> # removing rows with NA values for temperature
+  mutate(AverageTemperatureF = 32 + ((9/5) * AverageTemperature)) |> # add fahrenheit data
+  mutate(Date = as.Date(dt)) |> # convert dates to Date type
+  mutate(Year = strtoi(substr(dt, 1, 4))) |> # add year column for easy filtering
+  mutate(LatNumeric  = as.double(str_sub(Latitude, 0, -2))) |>
+  filter(Year >= 1900) # filter to relevant data
+
+# only run once
+global_temps <- global_temps |>
+  select(-c(LandMaxTemperature, LandMaxTemperatureUncertainty, LandMinTemperature, LandMinTemperatureUncertainty))
+
+global_temps <- global_temps |>
+  filter(!is.na(LandAverageTemperature) & !is.na(LandAndOceanAverageTemperature)) |> # removing rows with NA values for temperature
+  mutate(LandAverageTemperatureF = 32 + ((9/5) * LandAverageTemperature)) |> # add fahrenheit data
+  mutate(LandAndOceanAverageTemperatureF = 32 + ((9/5) * LandAndOceanAverageTemperature)) |>
+  mutate(Date = as.Date(dt)) |> # convert dates to Date type
+  mutate(Year = strtoi(substr(dt, 1, 4))) |> # add year column for easy filtering
+  filter(Year >= 1900) # filter to relevant data
+
+#view(temps_by_city)
+#view(temps_by_country)
+#view(global_temps)
+
+head(global_temps)
+```
+
+
+Now let's look at some of the data. For countries' data, we'll look at the US, UK, and Brazil. For cities, we'll glimpse at the data for some of the highest points. And finally, we'll take a glance at average global temperatures. 
+
+```{r}
+
+# graphing different countries' data using facet
+# code from here: http://www.cookbook-r.com/Graphs/Facets_(ggplot2)/
+temps_by_country |>
+  filter(Country == "United States" | Country == "United Kingdom" | Country == "Brazil") |>
+  ggplot(aes(x = Date, y = AverageTemperatureF)) + geom_point() + geom_smooth() + facet_grid(Country ~ .) + 
+  labs(x = "Year", y = "Average Monthly Temperature (F)", title = "Average Monthly Temperature over Time in Different Countries")
+
+temps_by_city |>
+  group_by(City, Country, LatNumeric) |>
+  summarize(TotalAverageF = mean(AverageTemperatureF)) |>
+  filter(TotalAverageF == max(TotalAverageF)) |>
+  ungroup() |>
+  filter(TotalAverageF == max(TotalAverageF))
+
+global_temps |>
+  ggplot(aes(x = Date, y = LandAndOceanAverageTemperatureF)) + geom_point() + geom_smooth() + 
+  labs(x = "Year", y = "Global Average Temperature (F)", title = "Global Average Temperature over Time")
+```
+
+We're going to filter average this data for each year to make it easier to look at.
+
+```{r}
+# country data
+
+# get yearly average
+temps_by_country_y <- temps_by_country |>
+  group_by(Year, Country) |>
+  summarize(YearAvgF = mean(AverageTemperatureF))
+
+# add country codes
+temps_by_country_y$ISOName <- lapply(temps_by_country_y$Country, rwmGetISO3)
+
+temps_by_country_y <- temps_by_country_y |> filter(!is.na(ISOName))
+
+temps_by_country_y |>
+  filter(Country == "United States" | Country == "United Kingdom" | Country == "Brazil") |>
+  ggplot(aes(x = Year, y = YearAvgF)) + geom_point() + geom_smooth() + facet_grid(Country ~ .) + 
+  labs(x = "Year", "Yearly Average Temperature (F)", title = "Yearly Average Temperature by Country")
+
+# city data
+temps_by_city_y <- temps_by_city |>
+  group_by(Year, City, LatNumeric) |>
+  summarize(YearAvgF = mean(AverageTemperatureF)) |>
+  ungroup()
+
+temps_by_city_y |>
+  filter(Year == 2013) |>
+  ungroup() |>
+  filter(YearAvgF == max(YearAvgF))
+
+# global data
+global_temps_y <- global_temps |>
+  group_by(Year) |>
+  summarize(LandYearAvgF = mean(LandAverageTemperatureF), LandAndOceanYearAvgF = mean(LandAndOceanAverageTemperatureF))
+
+global_temps_y |> # this has a cool visual with a conclusion!
+  ggplot(aes(x = Year, y = LandAndOceanYearAvgF)) + geom_point() + geom_smooth() + 
+  labs(x = "Year", y = "Yearly Average Global Temperature (F)", title = "Yearly Average Global Temperatures over Time")
+```
+
+
+```{r}
+# code from here: https://stackoverflow.com/questions/11225343/how-to-create-a-world-map-in-r-with-specific-countries-filled-in
+map_colors <- c('lightblue', 'yellow', 'orange', 'red')
+
+heatMapDF_recent <- temps_by_country_y |> ungroup() |> filter(Year == 2013) |> select(ISOName, YearAvgF)
+heatMapDF_old <- temps_by_country_y |> ungroup() |> filter(Year == 1913) |> select(ISOName, YearAvgF)
+# malDF is a data.frame with the ISO3 country names plus a variable to
+# merge to the map data
+
+heatMap_recent <- joinCountryData2Map(heatMapDF_recent, joinCode = "ISO3",
+  nameJoinColumn = "ISOName")
+heatMap_old <- joinCountryData2Map(heatMapDF_old, joinCode = "ISO3",
+  nameJoinColumn = "ISOName")
+# This will join your malDF data.frame to the country map data
+
+#heatMap
+
+mapCountryData(heatMap_recent, nameColumnToPlot="YearAvgF", catMethod = "pretty", colourPalette = map_colors,
+  missingCountryCol = gray(.8), addLegend = TRUE, borderCol = "black", mapTitle = "Average Yearly Temperature by Country (2013)")
+mapCountryData(heatMap_old, nameColumnToPlot="YearAvgF", catMethod = "pretty", colourPalette = map_colors,
+  missingCountryCol = gray(.8), addLegend = TRUE, borderCol = "black", mapTitle = "Average Yearly Temperature by Country (1913)")
+# And this will plot it, with the trick that the color palette's first
+# color is red
+
+
+# more code from here: https://www.rdocumentation.org/packages/rworldmap/versions/1.3-6
+```
+
+
+
+
+
+```{r}
+# make a linear model with time to predict overall temperatures in the future
+
+cor(global_temps_y$Year, global_temps_y$LandAndOceanYearAvgF)
+# nice correlation, let's look for outliers
+
+ggplot(global_temps_y) + geom_boxplot(aes(y = LandAndOceanYearAvgF)) + labs(y = "Global Average Temperatures (F)")
+# not too bad on outliers, let's keep going
+
+# look for normality
+ggplot(global_temps_y) + geom_histogram(aes(x = LandAndOceanYearAvgF)) + labs(x = "Global Yearly Averages", y = "Count", title = "Global Yearly Averages")
+# pretty normal, let's make the linear model now
+```
+Our data looks pretty good, let's actually do the thing. 
+
+```{r}
+global_lm <- lm(LandAndOceanYearAvgF ~ Year, data = global_temps_y)
+summary(global_lm)
+```
+Now a plot with the fit line:
+
+```{r}
+eq = paste0("Global Yearly Averages vs. Temperature Model: y = ", round(global_lm$coefficients[2],2),
+            "*x + ", round(global_lm$coefficients[1],2))
+
+global_temps_y |>
+  ggplot(aes(x = Year, y = LandAndOceanYearAvgF)) + geom_point(size = 2) +
+  xlab("Year") +
+  ylab("Global Yearly Averages") +
+  # add an arbitrary line with slope and intercept
+  geom_abline(intercept = global_lm$coefficients[1], # extract first coefficient from model
+              slope = global_lm$coefficients[2], # ditto
+              linetype = "dashed",
+              color = "blue",
+              linewidth = 1.5) +
+  ggtitle(eq) +
+  theme(plot.title = element_text(color="blue", size=14, face="bold"))
+```
+```{r}
+predict(global_lm, data.frame(Year = c(2013, 2015, 2020, 2023)))
+```
+
+
+
+```{r}
+# make a linear model with time to predict country temperatures
+# first check correlation
+temps_usa_y <- temps_by_country_y |> filter(ISOName == "USA")
+cor(temps_usa_y$Year, temps_usa_y$YearAvgF)
+# nice correlation, let's look for outliers
+
+ggplot(temps_usa_y) + geom_boxplot(aes(y = YearAvgF)) + labs(y = "Yearly Average Temperature (F)", title = "Yearly Average Temperature in the US")
+# not too bad on outliers, let's keep going
+
+# look for normality
+ggplot(temps_usa_y) + geom_histogram(aes(x = YearAvgF)) + labs(x = "Yearly Average Temperature (F)", y = "Count", title = "Yearly Average Temperature Distribution in the US")
+# pretty normal, let's make the linear model now
+```
+
+```{r}
+usa_lm <- lm(YearAvgF ~ Year, data = temps_usa_y)
+summary(usa_lm)
+```
+
+```{r}
+eq_usa = paste0("US Yearly Averages vs. Temperature Model: y = ", round(usa_lm$coefficients[2],2),
+            "*x + ", round(usa_lm$coefficients[1],2))
+
+temps_usa_y |>
+  ggplot(aes(x = Year, y = YearAvgF)) + geom_point(size = 2) +
+  xlab("Year") +
+  ylab("US Yearly Averages") +
+  # add an arbitrary line with slope and intercept
+  geom_abline(intercept = usa_lm$coefficients[1], # extract first coefficient from model
+              slope = usa_lm$coefficients[2], # ditto
+              linetype = "dashed",
+              color = "blue",
+              linewidth = 1.5) +
+  ggtitle(eq_usa) +
+  theme(plot.title = element_text(color="blue", size=14, face="bold"))
+```
+
+
+
+```{r}
+# make a linear model with latitude and time predicting city's temperatures
+# first check correlation
+
+temps_city_lat <- temps_by_city_y |> select(Year, LatNumeric, YearAvgF) |> ungroup()
+cor(temps_city_lat$Year, temps_city_lat$YearAvgF)
+cor(temps_city_lat$LatNumeric, temps_city_lat$YearAvgF)
+# nice correlation, let's look for outliers
+
+ggplot(temps_city_lat) + geom_boxplot(aes(y = LatNumeric)) + labs(y = "Yearly Average (F)", title = "Yearly Average Temperatures by City")
+# not too bad on outliers, let's keep going
+
+# look for normality
+ggplot(temps_city_lat) + geom_histogram(aes(x = YearAvgF)) + labs(x = "Yearly Average (F)", y = "Count", title = "Yearly Average Temperature Distribution")
+
+ggplot(temps_city_lat) + geom_point(aes(x = LatNumeric, y = YearAvgF)) + labs(x = "Latitude Distance from Equator", y = "Yearly Average Temperature by City", title = "Latitude vs. Temperature")
+# pretty normal, let's make the linear model now
+```
+
+
+```{r}
+lat_lm <- lm(YearAvgF ~ LatNumeric, data = temps_city_lat)
+summary(lat_lm)
+```
+
+
+```{r}
+eq_lat = paste0("Yearly Average Temperature by City (F) vs. Latitude Model: y = ", round(lat_lm$coefficients[2],2),
+            "*x + ", round(lat_lm$coefficients[1],2))
+
+temps_city_lat |>
+  ggplot(aes(x = LatNumeric, y = YearAvgF)) + geom_point(size = 2) +
+  xlab("Latitude Distance from Equator") +
+  ylab("Yearly Average Temperature by City (F)") +
+  # add an arbitrary line with slope and intercept
+  geom_abline(intercept = lat_lm$coefficients[1], # extract first coefficient from model
+              slope = lat_lm$coefficients[2], # ditto
+              linetype = "dashed",
+              color = "blue",
+              linewidth = 1.5) +
+  ggtitle(eq_lat) +
+  theme(plot.title = element_text(color="blue", size=14, face="bold"))
+```
+
+
+
+
+
+
